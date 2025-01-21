@@ -60,6 +60,9 @@ func (s ParcelStore) GetByClient(client int) ([]Parcel, error) {
 		}
 		res = append(res, p)
 	}
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
 	return res, nil
 }
 
@@ -74,45 +77,43 @@ func (s ParcelStore) SetStatus(number int, status string) error {
 	return nil
 }
 
-func (s ParcelStore) GetStatus(number int) (string, error) {
-	p := Parcel{}
-	row := s.db.QueryRow("SELECT status FROM parcel WHERE number = :number", sql.Named("number", number))
-	err := row.Scan(&p.Status)
-	if err != nil {
-		return "", fmt.Errorf("select failed: %w", err)
-	}
-
-	return p.Status, nil
-}
 func (s ParcelStore) SetAddress(number int, address string) error {
-	status, err := s.GetStatus(number)
-	if err != nil {
-		return fmt.Errorf("getStatus failed: %w", err)
-	}
-
-	if status != ParcelStatusRegistered {
-		return fmt.Errorf("address shouldn't be updated")
-	}
-	_, err = s.db.Exec("UPDATE parcel SET address = ? WHERE number = ?", address, number)
+	result, err := s.db.Exec(`
+		UPDATE parcel
+		SET address = ?
+		WHERE number = ? AND status = ?`,
+		address, number, ParcelStatusRegistered)
 	if err != nil {
 		return fmt.Errorf("update failed: %w", err)
 	}
-	return nil
 
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to check rows affected: %w", err)
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("address wasn't updated: either parcel not found or status isn't 'registered'")
+	}
+
+	return nil
 }
 
 func (s ParcelStore) Delete(number int) error {
-	result, err := s.db.Exec("DELETE FROM parcel WHERE number =:number AND status =:status", sql.Named("number", number), sql.Named("status", ParcelStatusRegistered))
+	result, err := s.db.Exec(`
+		DELETE FROM parcel
+		WHERE number = ? AND status = ?`,
+		number, ParcelStatusRegistered)
 	if err != nil {
-		return err
+		return fmt.Errorf("delete failed: %w", err)
 	}
+
 	rowsAffected, err := result.RowsAffected()
-	fmt.Println(rowsAffected)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to check rows affected: %w", err)
 	}
 	if rowsAffected == 0 {
-		return fmt.Errorf("посылка с номером %d не найдена или ее статус не 'registered'", number)
+		return fmt.Errorf("parcel with number %d wasn't deleted: either not found or status isn't 'registered'", number)
 	}
+
 	return nil
 }
